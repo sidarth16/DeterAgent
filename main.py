@@ -2,6 +2,7 @@
 from agent.agent import run_agent
 from agent.og_logger import fetch_footprints
 from deteragent.scrub import calculate_trust_score
+from execution.keeper_gate import trigger_keeperhub
 
 def run_traceback(task: str, urls: list[str]=[]) -> dict:
 
@@ -47,12 +48,22 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
 
     print("="*60)
 
-    return {**result, "task_id": task_id, "response": response}
+    keeper_result = trigger_keeperhub(result["trust_score"])
+
+    return {
+        **result,
+        "task_id": task_id,
+        "response": response,
+        "keeper": {
+            "status": "EXECUTE" if result["trust_score"] >= 70 else "BLOCKED",
+            "workflow_result": keeper_result
+        }
+    }
 
 
 if __name__ == "__main__":
     # TEST RUN
-    run_traceback(
+    final = run_traceback(
         task="When was Uniswap launched and who created it?"
         # task="What is the current ETH gas price?"
         # task="What are the latest Ethereum upgrades in 2026?"
@@ -63,5 +74,15 @@ if __name__ == "__main__":
         #     "https://uniswap.org/blog/uniswap-history"
         # ]
     )
+
+
+    print("\n" + "="*60)
+    print("🔐 KEEPERHUB EXECUTION GATE")
+    print("="*60)
+    print(f"Trust Score : {final['trust_score']}/100")
+    print(f"Verdict     : {final['verdict']}")
+    print(f"KeeperHub   : {final['keeper']['status']}")
+    print("="*60)
+
 
     
