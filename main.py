@@ -3,12 +3,20 @@ from agent.agent import run_agent
 from agent.og_logger import fetch_footprints
 from deteragent.scrub import calculate_trust_score
 from execution.keeper_gate import trigger_keeperhub
+from handle_ens.ens_manager import AGENTS, select_best_agent, update_trust_score, get_agent
 
 def run_traceback(task: str, urls: list[str]=[]) -> dict:
 
     print("\n" + "="*60)
-    print("⚡ TRACEBACK — TRUST LAYER FOR AI AGENTS")
+    print("⚡ DETERAGENT — TRUST LAYER FOR AI AGENTS")
     print("="*60)
+
+    # STEP 0 — Select best agent via ENS
+    best_agent = select_best_agent()
+    agent_name = best_agent["name"]
+    current_score = best_agent["trust_score"]
+    total_checks = best_agent["total_checks"]
+    all_agents = [get_agent(name) for name in AGENTS]
 
     # STEP 1: Run agent (fetches URLs, logs footprints)
     agent_result = run_agent(task, urls)
@@ -20,7 +28,7 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
     logged_sources = fetch_footprints(task_id)
     print(f"   Found {len(logged_sources)} logged sources")
 
-    # STEP 3: Run post-flight trust check
+    # STEP 3: Scrub: Run post-flight trust check
     print(f"\n🔍 Running post-flight check...")
     result = calculate_trust_score(task, response, logged_sources)
 
@@ -48,7 +56,13 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
 
     print("="*60)
 
+    # STEP 5 — KeeperHub
     keeper_result = trigger_keeperhub(result["trust_score"])
+
+    # STEP 6 — Update ENS if score changed significantly
+    new_checks = total_checks + 1
+    new_score = round((current_score * total_checks + result["trust_score"]) / new_checks)
+    update_trust_score(agent_name, new_score, current_score, new_checks)
 
     return {
         **result,
@@ -83,6 +97,3 @@ if __name__ == "__main__":
     print(f"Verdict     : {final['verdict']}")
     print(f"KeeperHub   : {final['keeper']['status']}")
     print("="*60)
-
-
-    
