@@ -1,170 +1,28 @@
 # deteragent/scrub.py
-import re
-from transformers import pipeline
+import json
+import os
+from openai import OpenAI
+from utils.ui_logger import emit
+from dotenv import load_dotenv
+load_dotenv()
 
-print("Loading NLI model...")
-nli = pipeline(
-    "text-classification",
-    model="cross-encoder/nli-deberta-v3-small",
-    device=-1  # CPU. Change to 0 if you have GPU
-)
-print("Model ready.")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-STOPWORDS = {
-    "the","a","an","is","are","was","were","it","in","on","at","to",
-    "for","of","and","or","but","with","this","that","these","those",
-    "its","their","our","has","have","had","be","been","being","will",
-    "would","could","should","may","might","can","do","does","did",
-    "not","no","so","if","as","by","from","into","about","than","then",
-    "when","where","which","who","what","how","also","just","only"
-}
-
-GROUNDING_THRESHOLD = 0.30
-RELEVANCE_THRESHOLD = 0.35
-
-def extract_sentences(response: str) -> list[str]:
-    sentences = re.split(r'(?<=[.!?])\s+', response.strip())
-    return [s.strip() for s in sentences
-            if len(s.split()) > 4 and len(s) > 20]
-
-def chunk_source(source: str, size: int = 60) -> list[str]:
-    """Break source into smaller overlapping chunks for better matching."""
-    words = source.split()
-    chunks = []
-    for i in range(0, len(words), max(size - 30, 1)):
-        chunk = " ".join(words[i:i+size])
-        if chunk:
-            chunks.append(chunk)
-    return chunks
-
-def source_sentences(source: str) -> list[str]:
-    """Split source into sentence-sized evidence units."""
-    parts = re.split(r'(?<=[.!?])\s+', source.strip())
-    return [part.strip() for part in parts if len(part.split()) > 3 and len(part) > 15]
-
-def evidence_candidates(source: str) -> list[str]:
-    """
-    Build a ranked list of candidate evidence snippets.
-    Sentence-sized snippets are checked first, then smaller chunks.
-    """
-    candidates = []
-    candidates.extend(source_sentences(source))
-    candidates.extend(chunk_source(source))
-
-    seen = set()
-    ordered = []
-    for candidate in candidates:
-        # print(f"      checking chunk: {candidate[:120]}...")
-        key = candidate[:500]
-        if key not in seen:
-            seen.add(key)
-            ordered.append(candidate)
-    return ordered
-
-def _truncate(text, max_chars=500):
-    return text[:max_chars]
-
-def _nli_scores(premise: str, hypothesis: str) -> dict[str, float]:
-    outputs = nli(
-        {
-            "text": _truncate(premise, 500),
-            "text_pair": _truncate(hypothesis, 200)
-        },
-        top_k=3   # 🔥 force 3 labels always
-    )
-
-    # print(f"      raw NLI output: {outputs}")
-
-    scores = {
-        "entailment": 0.0,
-        "neutral": 0.0,
-        "contradiction": 0.0
-    }
-
-    for item in outputs:
-        label = item["label"].lower()
-
-        if "entail" in label:
-            scores["entailment"] = item["score"]
-        elif "neutral" in label:
-            scores["neutral"] = item["score"]
-        elif "contradiction" in label:
-            scores["contradiction"] = item["score"]
-
-    return scores
-
-def keyword_filter(sentence: str, candidates: list[str]) -> list[str]:
-    keywords = [
-        w.lower() for w in sentence.split()
-        if w.lower() not in STOPWORDS and len(w) > 3
-    ]
-
-    filtered = []
-    for c in candidates:
-        text = c.lower()
-        if any(k in text for k in keywords):
-            filtered.append(c)
-
-    return filtered if filtered else candidates[:10]
+emit("Loading...  Deter.Agent...")
 
 
+SYSTEM_PROMPT = """You are a verification agent.
+Your ONLY job is to check if an agent's response is grounded in its logged sources.
 
-def is_grounded(sentence: str, sources: list[str]) -> bool:
-    """
-    Check if sentence is entailed by ANY chunk in sources.
-    Uses NLI — understands meaning, not just keywords.
-    """
-    best_score = 0.0
-    best_chunk = ""
+Rules:
+- Grounded = the claim is supported by or present in the sources
+- Ungrounded = the claim is not in any source (agent assumed or invented it)
+- Relevant = the sentence helps answer the original task
+- Answer = the agent's yes/no conclusion to the task (if applicable)
 
-    for source in sources:
-        candidates = evidence_candidates(source)
-        candidates = keyword_filter(sentence, candidates)
-        for candidate in candidates[:50]:  # keep NLI calls bounded
-            try:
-                scores = _nli_scores(candidate, sentence)
-                entailment_score = scores["entailment"]
-                # print(f"      parsed entailment score: {entailment_score:.4f}")
+Be strict about grounding. If a number or fact is not explicitly in the sources, mark it ungrounded.
+Return ONLY valid JSON. No markdown. No explanation outside the JSON."""
 
-                if entailment_score > best_score:
-                    best_score = entailment_score
-                    best_chunk = candidate
-
-                if best_score >= GROUNDING_THRESHOLD:
-                    return True  # found strong match — stop early
-            except:
-                continue
-
-    # print(f"      best entailment score: {best_score:.4f}")
-    # if best_chunk:
-        # print(f"      best grounding chunk: {best_chunk[:120]}...")
-    return best_score >= GROUNDING_THRESHOLD
-
-def is_relevant(sentence: str, task: str) -> bool:
-    """
-    Check if sentence actually helps answer the task.
-    Uses NLI — task entails sentence = relevant.
-    """
-    try:
-        # quick keyword filter
-        sentence_words = set(sentence.lower().split())
-        task_words = set(task.lower().split())
-
-        overlap = len(sentence_words & task_words)
-        # print(f"      keyword overlap: {overlap}")
-
-        # More lenient: 1 keyword overlap is enough
-        if overlap >= 1:
-            return True
-
-        scores = _nli_scores(sentence, task)
-        entailment_score = scores["entailment"]
-        # print(f"      relevance entailment score: {entailment_score:.4f}")
-        return entailment_score >= RELEVANCE_THRESHOLD
-
-    except Exception as e:
-        print(f"      relevance error: {e}")
-        return True # benefit of doubt
 
 def calculate_trust_score(
     task: str,
@@ -172,59 +30,84 @@ def calculate_trust_score(
     logged_sources: list[str]
 ) -> dict:
 
-    sentences = extract_sentences(response)
+    sources_text = "\n\n---\n\n".join(logged_sources[:3])
 
-    if not sentences:
-        return {
-            "trust_score": 0,
-            "hallucination_score": 0,
-            "relevance_score": 0,
-            "verdict": "NO CONTENT",
-            "sentence_results": []
-        }
+    prompt = f"""Task: {task}
 
-    results = []
-    for sentence in sentences:
-        print(f"   🔍 Checking: {sentence[:60]}...")
-        grounded = is_grounded(sentence, logged_sources)
-        relevant = is_relevant(sentence, task)
+Agent Response: {response}
 
-        results.append({
-            "sentence": sentence,
-            "grounded": grounded,
-            "relevant": relevant,
-            "status": "CLEAN" if (grounded and relevant) else "FLAGGED",
-            "flag_reason": (
-                None if (grounded and relevant) else
-                "not grounded in sources" if (not grounded and relevant) else
-                "not relevant to task" if (grounded and not relevant) else
-                "not grounded and not relevant"
-            )
-        })
+Logged Sources (what the agent actually read):
+{sources_text[:4000]}
 
-    total = len(results)
-    grounded_count = sum(1 for r in results if r["grounded"])
-    relevant_count = sum(1 for r in results if r["relevant"])
-    clean_count = sum(1 for r in results if r["grounded"] and r["relevant"])
+Analyze and return ONLY this JSON:
+{{
+  "grounding_score": <0-100>,
+  "relevance_score": <0-100>,
+  "trust_score": <0-100>,
+  "answer": <"YES" | "NO" | "UNCLEAR">,
+  "verdict": <"TRUST" | "VERIFY" | "DO NOT TRUST">,
+  "reasoning": "<one sentence>",
+  "ungrounded_claims": ["<claim1>", "<claim2>"],
+  "sentence_results": [
+    {{
+      "sentence": "<sentence>",
+      "grounded": <true|false>,
+      "relevant": <true|false>,
+      "status": <"CLEAN" | "FLAGGED">,
+      "flag_reason": <null | "ungrounded claim" | "not relevant to task">
+    }}
+  ]
+}}"""
 
-    hallucination_score = round((grounded_count / total) * 100)
-    relevance_score = round((relevant_count / total) * 100)
-    trust_score = round((clean_count / total) * 100)
+    # print(f"\n🔍 scrubbing agents's response...")
 
-    if trust_score >= 80:
-        verdict = "TRUST"
-    elif trust_score >= 50:
-        verdict = "VERIFY"
+    result = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0
+    )
+
+    text = result.choices[0].message.content.strip()
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    data = json.loads(text)
+
+    # Normalize verdict
+    score = data.get("trust_score", 0)
+    if score >= 80:
+        data["verdict"] = "TRUST"
+    elif score >= 50:
+        data["verdict"] = "VERIFY"
     else:
-        verdict = "DO NOT TRUST"
+        data["verdict"] = "DO NOT TRUST"
 
-    return {
-        "trust_score": trust_score,
-        "hallucination_score": hallucination_score,
-        "relevance_score": relevance_score,
-        "verdict": verdict,
-        "total_sentences": total,
-        "clean_count": clean_count,
-        "flagged_count": total - clean_count,
-        "sentence_results": results
-    }
+    # Add counts
+    sentences = data.get("sentence_results", [])
+    data["total_sentences"] = len(sentences)
+    data["clean_count"] = sum(1 for s in sentences if s.get("status") == "CLEAN")
+    data["flagged_count"] = data["total_sentences"] - data["clean_count"]
+
+    # Keep backward compat
+    data["hallucination_score"] = data.get("grounding_score", 0)
+
+    print(f"   Grounding  : {data.get('grounding_score')}/100")
+    print(f"   Relevance  : {data.get('relevance_score')}/100")
+    print(f"   Trust Score: {data.get('trust_score')}/100")
+    print(f"   Answer     : {data.get('answer')}")
+    print(f"   Verdict    : {data.get('verdict')}")
+
+
+    # return {
+    #     "trust_score": trust_score,
+    #     "hallucination_score": hallucination_score,
+    #     "relevance_score": relevance_score,
+    #     "verdict": verdict,
+    #     "total_sentences": total,
+    #     "clean_count": clean_count,
+    #     "flagged_count": total - clean_count,
+    #     "sentence_results": results
+    # }
+    return data
