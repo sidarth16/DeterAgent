@@ -2,8 +2,11 @@
 import uuid
 import requests
 from openai import OpenAI
-from agent.og_logger import log_footprint, fetch_footprints
+import time
+
+from agent.og_logger import build_proof_bundle, log_footprint, upload_proof_bundle
 from config import OPENAI_API_KEY
+from utils.ui_logger import emit
 
 import trafilatura
 from ddgs import DDGS
@@ -31,10 +34,10 @@ def fetch_url(url: str) -> str:
             text = re.sub(r'<[^>]+>', ' ', r.text)
             text = re.sub(r'\s+', ' ', text).strip()
 
-        print(f"   ✅ Fetched {len(text)} chars from {url[:50]}")
+        emit(f"Read {len(text)} chars from {url[:50]}")
         return text[:4000]
     except Exception as e:
-        print(f"   ❌ Failed to fetch {url}: {e}")
+        emit(f"Failed to read {url}: {e}")
         return ""
     
 def search_urls(task: str, max_results: int = 3) -> list[str]:
@@ -42,48 +45,68 @@ def search_urls(task: str, max_results: int = 3) -> list[str]:
     with DDGS() as ddgs:
         results = list(ddgs.text(task, max_results=max_results))
     urls = [r["href"] for r in results]
-    print(f"   🔎 Found {len(urls)} sources for: {task}")
+    emit(f"Found {len(urls)} sources for: {task}")
     for url in urls:
-        print(f"      → {url}")
+        emit(f"Source picked: {url}")
     return urls
 
 
-def run_agent(task: str, urls: list[str]) -> dict:
+def collect_sources_and_proof(task: str, urls: list[str] | None = None) -> dict:
     """
-    Run the agent:
+    Collect sources and upload one proof bundle:
     1. Fetch each URL
-    2. Log every source to og_logger
-    3. Generate response using OpenAI
+    2. Build a single proof bundle from all sources
+    3. Upload the proof bundle to 0G Storage
     """
     task_id = str(uuid.uuid4())[:8]
-    print(f"\n🤖 Agent starting...")
-    print(f"   Task: {task}")
-    print(f"   Task ID: {task_id}")
+    emit("Agent starting...")
+    emit(f"Task in hand: {task}")
+    emit(f"Task ID pinned: {task_id}")
 
-    # Step 1: Fetch and log sources
-    sources = []
-    print(f"\n📥 Fetching {len(urls)} sources...")
-    
     # Agent finds its own URLs
-    urls = search_urls(task)
+    urls = urls or search_urls(task)
+    emit(f"Fetching {len(urls)} sources...")
 
+    sources = []
     for url in urls:
         content = fetch_url(url)
         if content:
             log_footprint(task_id, url, content)
-            sources.append(content)
+            sources.append({
+                "url": url,
+                "content": content,
+                "fetched_at": time.time(),
+            })
 
     if not sources:
         return {
             "task_id": task_id,
             "task": task,
-            "response": "No sources could be fetched.",
-            "sources": []
+            "urls": urls,
+            "sources": [],
+            "proof_hash": "local_only",
+            "source_count": 0,
         }
 
-    # Step 2: Generate response
-    combined = "\n\n---\n\n".join(sources)
-    print(f"\n🧠 Generating response...")
+    emit(f"Fetched {len(sources)} sources")
+
+    proof_bundle = build_proof_bundle(task_id, task, sources)
+    emit(f"Logging proof bundle to 0G with {proof_bundle['source_count']} sources...")
+    proof_hash = upload_proof_bundle(proof_bundle)
+
+    return {
+        "task_id": task_id,
+        "task": task,
+        "urls": urls,
+        "sources": sources,
+        "source_count": len(sources),
+        "proof_hash": proof_hash,
+        "proof_bundle": proof_bundle,
+    }
+
+def generate_response(task: str, sources: list[dict]) -> str:
+    combined = "\n\n---\n\n".join(source["content"] for source in sources)
+    emit("Generating response...")
 
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -99,12 +122,25 @@ Sources:
         }]
     )
 
-    response = completion.choices[0].message.content
-    print(f"\n📝 Agent response:\n{response}")
+    response = completion.choices[0].message.content or ""
+    emit(f"Agent response: {response}")
+    return response
 
+
+def run_agent(task: str, urls: list[str]) -> dict:
+    proof_result = collect_sources_and_proof(task, urls)
+    if not proof_result.get("sources"):
+        return {
+            "task_id": proof_result["task_id"],
+            "task": task,
+            "response": "No sources could be fetched.",
+            "sources": [],
+            "source_count": 0,
+            "proof_hash": proof_result.get("proof_hash", "local_only"),
+        }
+
+    response = generate_response(task, proof_result["sources"])
     return {
-        "task_id": task_id,
-        "task": task,
+        **proof_result,
         "response": response,
-        "source_count": len(sources)
     }

@@ -1,6 +1,10 @@
-import json, os, time, subprocess
+import json
+import os
+import subprocess
+import time
 from dotenv import load_dotenv
 load_dotenv()
+from utils.ui_logger import emit
 
 LOG_FILE = "logs/footprints.json"
 OG_SCRIPT = os.path.join(
@@ -8,7 +12,24 @@ OG_SCRIPT = os.path.join(
     "../og_storage/upload.js"
 )
 
-def log_footprint(task_id: str, url: str, content: str) -> str:
+def _load_logs() -> list[dict]:
+    if not os.path.exists(LOG_FILE):
+        return []
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if isinstance(payload, list):
+            return payload
+    except Exception:
+        pass
+    return []
+
+def _save_logs(logs: list[dict]) -> None:
+    os.makedirs("logs", exist_ok=True)
+    with open(LOG_FILE, "w", encoding="utf-8") as handle:
+        json.dump(logs, handle, indent=2)
+
+def log_footprint(task_id: str, url: str, content: str) -> dict:
     os.makedirs("logs", exist_ok=True)
 
     entry = {
@@ -19,21 +40,37 @@ def log_footprint(task_id: str, url: str, content: str) -> str:
     }
 
     # Save locally always
-    logs = []
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE) as f:
-            logs = json.load(f)
+    logs = _load_logs()
     logs.append(entry)
-    with open(LOG_FILE, "w") as f:
-        json.dump(logs, f, indent=2)
+    _save_logs(logs)
 
-    print(f"    Logged: {url[:60]}")
+    emit(f"Footprint logged: {url[:60]}")
+    return entry
 
+def build_proof_bundle(task_id: str, task: str, sources: list[dict]) -> dict:
+    return {
+        "task_id": task_id,
+        "task": task,
+        "source_count": len(sources),
+        "sources": [
+            {
+                "url": source.get("url", ""),
+                "content": (source.get("content") or "")[:3000],
+                "content_length": len(source.get("content") or ""),
+                "fetched_at": source.get("fetched_at"),
+            }
+            for source in sources
+        ],
+        "created_at": time.time(),
+    }
+
+def upload_proof_bundle(bundle: dict) -> str:
     # Upload to 0G Storage
     try:
+        task_id = str(bundle.get("task_id", "unknown"))
         tmp_path = f"logs/tmp_{task_id}_{int(time.time())}.json"
-        with open(tmp_path, "w") as f:
-            json.dump(entry, f)
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(bundle, handle, indent=2)
 
         result = subprocess.run(
             ["node", OG_SCRIPT, os.path.abspath(tmp_path)],
@@ -53,20 +90,17 @@ def log_footprint(task_id: str, url: str, content: str) -> str:
                         .split('\n') if l.startswith('{')][-1]
             data = json.loads(last_line)
             root = data['rootHash']
-            print(f"    0G Storage: {root[:20]}...")
+            emit(f"0G proof pinned: {root[:]}...")
             return root
         else:
-            print(f"   ⚠️  0G failed: {result.stderr[-100:]}")
+            emit(f"0G upload failed: {result.stderr[-100:]}")
             return "local_only"
 
     except Exception as e:
-        print(f"   ⚠️  0G Storage failed: {e}")
+        emit(f"0G upload failed: {e}")
         return "local_only"
 
 def fetch_footprints(task_id: str) -> list[str]:
-    if not os.path.exists(LOG_FILE):
-        return []
-    with open(LOG_FILE) as f:
-        logs = json.load(f)
+    logs = _load_logs()
     return [e["content"] for e in logs
             if e["task_id"] == task_id]
