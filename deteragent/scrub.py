@@ -20,8 +20,47 @@ Rules:
 - Relevant = the sentence helps answer the original task
 - Answer = the agent's yes/no conclusion to the task (if applicable)
 
+Scoring rules (be granular, avoid 0 and 100 unless extreme):
+
+GROUNDING (0-100):
+- Every claim explicitly in sources → 90-100
+- Most claims in sources, minor gaps → 60-80
+- Some grounded, key facts missing → 30-55
+- Claims contradict sources → 0-20
+
+RELEVANCE (0-100):
+- Directly answers task precisely → 85-100
+- Answers but vague/incomplete → 50-75
+- Partially related → 20-45
+
+TRUST SCORE = (grounding * 0.6) + (relevance * 0.4)
+DO NOT set trust_score independently. Always compute it.
+
 Be strict about grounding. If a number or fact is not explicitly in the sources, mark it ungrounded.
-Return ONLY valid JSON. No markdown. No explanation outside the JSON."""
+Return ONLY valid JSON. No markdown. No explanation outside the JSON.
+
+IMPORTANT — Handling "I don't know" responses:
+
+CASE 1: Agent says it doesn't know BUT the answer IS present in sources
+- This is a failure — agent ignored available evidence
+- Grounding score = 20
+- Relevance score = 40  
+- Trust score = 28
+- Verdict = "DO NOT TRUST"
+- Flag reason = "agent ignored available source data"
+
+CASE 2: Agent says it doesn't know AND answer is genuinely absent from sources
+- This is honest uncertainty, not hallucination
+- Grounding score = 70
+- Relevance score = 60
+- Trust score = 66
+- Verdict = "VERIFY"
+- Flag reason = null
+
+To determine which case: search the logged sources carefully.
+If the answer can be derived or found in sources → CASE 1
+If sources genuinely lack the information → CASE 2
+"""
 
 
 def calculate_trust_score(
