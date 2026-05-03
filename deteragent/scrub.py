@@ -8,7 +8,7 @@ load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-emit("Loading...  Deter.Agent...")
+# emit("Loading...  Deter.Agent...")
 
 
 SYSTEM_PROMPT = """You are a verification agent.
@@ -23,8 +23,8 @@ Rules:
 Scoring rules (be granular, avoid 0 and 100 unless extreme):
 
 GROUNDING (0-100):
-- Every claim explicitly in sources → 90-100
-- Most claims in sources, minor gaps → 60-80
+- Every claimed facts explicitly in sources → 90-100
+- Most claimed facts in sources, minor gaps → 60-80
 - Some grounded, key facts missing → 30-55
 - Claims contradict sources → 0-20
 
@@ -132,11 +132,11 @@ Analyze and return ONLY this JSON:
     # Keep backward compat
     data["hallucination_score"] = data.get("grounding_score", 0)
 
-    print(f"   Grounding  : {data.get('grounding_score')}/100")
-    print(f"   Relevance  : {data.get('relevance_score')}/100")
-    print(f"   Trust Score: {data.get('trust_score')}/100")
-    print(f"   Answer     : {data.get('answer')}")
-    print(f"   Verdict    : {data.get('verdict')}")
+    # print(f"   Grounding  : {data.get('grounding_score')}/100")
+    # print(f"   Relevance  : {data.get('relevance_score')}/100")
+    # print(f"   Trust Score: {data.get('trust_score')}/100")
+    # print(f"   Answer     : {data.get('answer')}")
+    # print(f"   Verdict    : {data.get('verdict')}")
 
 
     # return {
