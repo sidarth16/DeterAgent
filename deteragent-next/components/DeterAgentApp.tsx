@@ -557,7 +557,6 @@ export default function DeterAgentApp() {
           onOk={() => {
             setSealLocked(true);
             setCompletionOpen(false);
-            window.scrollTo({ top: 0, behavior: "smooth" });
           }}
         />
       )}
@@ -1595,7 +1594,7 @@ function CompletionSealModal({
       ? "border-mintx/30 bg-mintx/10 text-mintx"
       : outcome === "FAILED"
         ? "border-red-500/30 bg-red-500/10 text-red-400"
-        : "border-orangex/30 bg-orangex/10 text-orangex";
+        : "border-red-500/30 bg-red-500/10 text-red-400";
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 px-4 backdrop-blur-sm">
@@ -1618,7 +1617,7 @@ function CompletionSealModal({
           </div>
           <div className="flex items-center justify-between gap-3">
             <span className="text-slate-400">Outcome</span>
-            <span className={cx("font-semibold uppercase tracking-[0.12em]", outcome === "EXECUTED" ? "text-mintx" : outcome === "FAILED" ? "text-red-400" : "text-orangex")}>
+            <span className={cx("font-semibold uppercase tracking-[0.12em]", outcome === "EXECUTED" ? "text-mintx" : "text-red-400")}>
               {outcome}
             </span>
           </div>

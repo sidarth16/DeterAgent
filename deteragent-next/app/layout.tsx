@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "DeterAgent",
-  description: "Trust and execution layer for AI agents",
+  description: "Trust Firewall & Execution Layer for AI Agents",
 };
 
 export default function RootLayout({
