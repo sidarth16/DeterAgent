@@ -75,6 +75,10 @@ Result: Trust Score 28/100 → Execution blocked → Agent reputation penalized
 - Trust scores read and written programmatically after every execution
 - Agent selection based on ENS reputation at runtime
 - Records: `class`, `alias`, `description`, `supported-trust`, `trust_score`, `total_checks`, `OG-proof-hash`
+- ENS Agent link : 
+  - [agentx01.deteragent.eth](https://sepolia.app.ens.domains/agentx01.deteragent.eth?tab=records)
+  - [agentx02.deteragent.eth](https://sepolia.app.ens.domains/agentx02.deteragent.eth?tab=records)
+  - [agentx03.deteragent.eth](https://sepolia.app.ens.domains/agentx03.deteragent.eth?tab=records)
 
 ```
 agentx01.deteragent.eth — Trust Score: 52
@@ -87,6 +91,7 @@ agentx03.deteragent.eth — Trust Score: 59
 - Root hash returned and stored before trust is calculated
 - 0G proof hash anchored in ENS text records permanently
 - Creates tamper-proof evidence for every agent decision
+- Agent's Proof Storage updations : [0xf422349bf18d17f254265419df5282eed29973f0/submissions](https://explorer.0g.ai/testnet/blockchain/accounts/0xf422349bf18d17f254265419df5282eed29973f0/submissions)
 
 ### ⚡ KeeperHub — Conditional Execution Gate
 - Only fires when trust score exceeds threshold
@@ -94,7 +99,7 @@ agentx03.deteragent.eth — Trust Score: 59
 - Real onchain transaction receipts with SwapExecuted/BuyExecuted events
 - Telegram notification on every execution
 - Workflow: Verify Trust → Execute or Block → Update Reputation
-
+- Workflow link : https://app.keeperhub.com/workflows/m8lraf1nja21865y37d0i
 ---
 
 ## Trust Score Breakdown
