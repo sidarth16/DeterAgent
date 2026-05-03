@@ -44,7 +44,7 @@ def log_footprint(task_id: str, url: str, content: str) -> dict:
     logs.append(entry)
     _save_logs(logs)
 
-    emit(f"Footprint logged: {url[:60]}")
+    # emit(f"Footprint logged: {url[:60]}")
     return entry
 
 def build_proof_bundle(task_id: str, task: str, sources: list[dict]) -> dict:
