@@ -100,6 +100,7 @@ agentx03.deteragent.eth — Trust Score: 59
 - Telegram notification on every execution
 - Workflow: Verify Trust → Execute or Block → Update Reputation
 - Workflow link : https://app.keeperhub.com/workflows/m8lraf1nja21865y37d0i
+
 ---
 
 ## Trust Score Breakdown
@@ -177,8 +178,9 @@ Computed from:
 
 ## Team
 
-**Sidarth S**   
+**Sidarth S** <br/>
 Web3 Security Engineer
+
 ---
 
 ## License
