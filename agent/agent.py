@@ -34,10 +34,12 @@ def fetch_url(url: str) -> str:
             text = re.sub(r'<[^>]+>', ' ', r.text)
             text = re.sub(r'\s+', ' ', text).strip()
 
-        emit(f"Read {len(text)} chars from {url[:50]}")
+        # emit(f"Read {len(text)} chars from {url[:50]}")
         return text[:4000]
     except Exception as e:
-        emit(f"Failed to read {url}: {e}")
+        # emit(f"Failed to read {url}: {e}")
+        emit(f"Failed to read {url}")
+
         return ""
     
 def search_urls(task: str, max_results: int = 3) -> list[str]:
@@ -45,9 +47,12 @@ def search_urls(task: str, max_results: int = 3) -> list[str]:
     with DDGS() as ddgs:
         results = list(ddgs.text(task, max_results=max_results))
     urls = [r["href"] for r in results]
-    emit(f"Found {len(urls)} sources for: {task}")
-    for url in urls:
-        emit(f"Source picked: {url}")
+    # emit(f"Found {len(urls)} sources for: {task}")
+    emit(f"Fetching from {len(urls)} sources...")
+    # for url in urls:
+    #     # emit(f"Source picked: {url}")
+    #     emit(f" {url}")
+
     return urls
 
 
@@ -59,18 +64,21 @@ def collect_sources_and_proof(task: str, urls: list[str] | None = None) -> dict:
     3. Upload the proof bundle to 0G Storage
     """
     task_id = str(uuid.uuid4())[:8]
-    emit("Agent starting...")
-    emit(f"Task in hand: {task}")
+    # emit("Agent initialized for condition verification")
+    emit(f"Checking: {task}")
     emit(f"Task ID pinned: {task_id}")
 
     # Agent finds its own URLs
     urls = urls or search_urls(task)
-    emit(f"Fetching {len(urls)} sources...")
+    # emit(f"Fetching {len(urls)} sources...")
+    # emit(f"Fetching from {len(urls)} sources...")
+    # emit(urls)
 
     sources = []
     for url in urls:
         content = fetch_url(url)
         if content:
+            emit(f"✅ {url}")
             log_footprint(task_id, url, content)
             sources.append({
                 "url": url,
@@ -88,7 +96,7 @@ def collect_sources_and_proof(task: str, urls: list[str] | None = None) -> dict:
             "source_count": 0,
         }
 
-    emit(f"Fetched {len(sources)} sources")
+
 
     proof_bundle = build_proof_bundle(task_id, task, sources)
     emit(f"Logging proof bundle to 0G with {proof_bundle['source_count']} sources...")
@@ -106,23 +114,46 @@ def collect_sources_and_proof(task: str, urls: list[str] | None = None) -> dict:
 
 def generate_response(task: str, sources: list[dict]) -> str:
     combined = "\n\n---\n\n".join(source["content"] for source in sources)
-    emit("Generating response...")
+    emit("Generating response from sources ...")
 
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{
-            "role": "user",
-            "content": f"""Answer this question using ONLY 
-the sources below. Be specific. 3-5 sentences.
+        temperature=0.4,
+        messages=[
+            {
+                "role": "system",
+                "content": """You are a grounded AI agent.
 
-Question: {task}
+Your job is to answer questions using the provided sources.
+
+RULES:
+- Use the sources as your primary evidence
+- You MAY make simple, safe inferences (e.g., comparing numbers)
+- DO NOT introduce new facts, numbers, or dates not present in sources
+- Avoid time-based assumptions like "yesterday" or "today" unless explicitly stated
+- If information is unclear, answer cautiously instead of guessing
+
+STYLE:
+- 1–3 sentences
+- Clear, concise, and confident
+- No fluff, no speculation
+"""
+            },
+            {
+                "role": "user",
+                "content": f"""Question: {task}
 
 Sources:
 {combined[:6000]}"""
-        }]
+            }
+        ]
     )
 
-    response = completion.choices[0].message.content or ""
+    response = completion.choices[0].message.content.strip()
+
+    if not response:
+        response = "Based on the provided sources, I cannot determine this clearly."
+
     emit(f"Agent response: {response}")
     return response
 
