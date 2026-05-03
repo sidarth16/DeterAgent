@@ -1,7 +1,7 @@
 # DeterAgent 🛡️
 ### Trust Firewall & Execution Layer for Autonomous AI Agents
 
-> No verification. No execution 
+> No verification. No execution <br/>
 > Only trusted actions reach the chain
 
 ## The Problem
