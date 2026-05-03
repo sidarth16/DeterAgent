@@ -18,17 +18,17 @@ const indexer = new Indexer(INDEXER_RPC);
 // Wrap in async function
 async function main() {
     try {
-        const rootHash = "0x0cb929d33618a74c3634e7e6cd2676f8fb1cca901e88b5554d4ad69fb0f42d40";
+        const rootHash = "0x0e2b92067e0618b22ceea5c9bacd64973915adfb0c63d3ed7b84a73591fc9cd7";
 
         console.log("⬇️ Downloading from 0G...");
 
-        const err = await indexer.download(rootHash, './hello.json', true);
+        const err = await indexer.download(rootHash, './hello-1.json', true);
 
         if (err) {
             throw err;
         }
 
-        console.log("✅ File downloaded successfully to ./hello.json");
+        console.log("✅ File downloaded successfully to ./hello-1.json");
 
     } catch (e) {
         console.error("❌ Error:", e);

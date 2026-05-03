@@ -38,9 +38,10 @@ CURRENT_LINE = ""
 PROCESS_STATE = STATE_RUNNING
 
 from agent.agent import collect_sources_and_proof, generate_response
+from agent.get_intent import parse_user_intent
 from agent.og_logger import fetch_footprints
 from execution.keeper_gate import trigger_keeperhub
-from handle_ens.ens_manager import AGENTS, select_best_agent, update_trust_score, list_agents
+from handle_ens.ens_manager import AGENTS, select_best_agent, update_trust_score_and_og_proof, list_agents
 
 from deteragent.scrub import calculate_trust_score
 
@@ -172,13 +173,17 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
             sync_logger_context()
             ui.push_state(patch=extra)
 
-    emit("⚡ Traceback diary: trust layer for AI agents")
+    # emit("⚡ Traceback diary: trust layer for AI agents")
+
+    # Extract User Intent : 
+    intent = parse_user_intent(task)
+    condition_to_check = intent['condition']
 
     # STEP 0 — Select best agent via ENS
     CURRENT_CATEGORY = CAT_ENS
     CURRENT_STEP = STEP_AGENT_SELECTION
     CURRENT_STEP_STATE = STEP_ACTIVE
-    emit("Selecting the best agent from ENS")
+    # emit("Selecting the best agent from ENS")
     best_agent = select_best_agent()
     agent_name = best_agent["name"]
     current_score = best_agent["trust_score"]
@@ -195,8 +200,9 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
     CURRENT_CATEGORY = CAT_FETCH
     CURRENT_STEP = STEP_FETCH_URL_PROOF
     CURRENT_STEP_STATE = STEP_ACTIVE
-    emit(f"Let’s start our agent ({agent_name})")
-    proof_result = collect_sources_and_proof(task, urls)
+    emit(f"Starting agent ({agent_name})")
+    
+    proof_result = collect_sources_and_proof(condition_to_check, urls)
     task_id = proof_result["task_id"]
     source_count = proof_result.get("source_count", 0)
     live_state["task_id"] = task_id
@@ -210,7 +216,7 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
     CURRENT_STEP = STEP_AGENT_RESPONSE
     CURRENT_STEP_STATE = STEP_ACTIVE
     if proof_result.get("sources"):
-        response = generate_response(task, proof_result.get("sources", []))
+        response = generate_response(condition_to_check, proof_result.get("sources", []))
     else:
         response = "No sources could be fetched."
     agent_result = {
@@ -221,26 +227,31 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
     CURRENT_STEP_STATE = STEP_DONE
     publish(response=response)
 
-    # STEP 2: Deteragent: Fetch logged sources 
-    CURRENT_CATEGORY = CAT_FETCH
-    CURRENT_STEP = STEP_FETCH_URL_PROOF
-    CURRENT_STEP_STATE = STEP_ACTIVE
-    emit("Gathering logged sources")
-    logged_sources = fetch_footprints(task_id)
-    emit(f"Found {len(logged_sources)} logged sources")
-    for index, source in enumerate(logged_sources[:4], start=1):
-        emit(f"Receipt {index}: {source[:140]}")
-    live_state["logged_sources"] = logged_sources
-    CURRENT_STEP_STATE = STEP_DONE
-    publish(logged_sources=logged_sources)
-
     # STEP 3: Deteragent Scrub (Run post-flight trust check)
     CURRENT_CATEGORY = CAT_TRUST
     CURRENT_STEP = STEP_TRUST_ANALYSIS
     CURRENT_STEP_STATE = STEP_ACTIVE
-    emit("Reviewing trust, relevance, and hallucination")
-    result = calculate_trust_score(task, response, logged_sources)
-    emit(f"Hallucination score: {result['grounding_score']}/100")
+
+    # STEP 2: Deteragent: Fetch logged sources 
+    # CURRENT_CATEGORY = CAT_FETCH
+    # CURRENT_STEP = STEP_FETCH_URL_PROOF
+    # CURRENT_STEP_STATE = STEP_ACTIVE
+    # emit("Gathering logged sources")
+    logged_sources = fetch_footprints(task_id)
+    emit(f"Found {len(logged_sources)} logged sources from 0G")
+    # for index, source in enumerate(logged_sources[:4], start=1):
+    #     emit(f"Receipt {index}: {source[:140]}")
+    live_state["logged_sources"] = logged_sources
+    CURRENT_STEP_STATE = STEP_DONE
+    publish(logged_sources=logged_sources)
+
+    # # STEP 3: Deteragent Scrub (Run post-flight trust check)
+    # CURRENT_CATEGORY = CAT_TRUST
+    # CURRENT_STEP = STEP_TRUST_ANALYSIS
+    # CURRENT_STEP_STATE = STEP_ACTIVE
+    emit("Reviewing trust, relevance, and Grounding")
+    result = calculate_trust_score(condition_to_check, response, logged_sources)
+    emit(f"Grounding score: {result['grounding_score']}/100")
     emit(f"Relevance score: {result['relevance_score']}/100")
     emit(f"Trust score: {result['trust_score']}/100")
     emit(f"Verdict: {result['verdict']}")
@@ -250,7 +261,7 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
     for sentence_result in result["sentence_results"]:
         icon = "✅" if sentence_result["status"] == "CLEAN" else "🚨"
         emit(f"{icon} {sentence_result['sentence'][:80]}")
-        if sentence_result["flag_reason"]:
+        if sentence_result.get("flag_reason",None):
             emit(f"↳ {sentence_result['flag_reason']}")
     CURRENT_STEP_STATE = STEP_DONE
     publish(**result)
@@ -259,26 +270,43 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
     CURRENT_CATEGORY = CAT_EXEC
     CURRENT_STEP = STEP_KEEPERHUB_GATE
     CURRENT_STEP_STATE = STEP_ACTIVE
-    emit("Passing through KeeperHub")
-    keeper_result = trigger_keeperhub(result["trust_score"])
-    keeper_success = bool(keeper_result.get("success") or keeper_result.get("status") == "success")
-    keeper_status = keeper_result.get("status")
-    keeper_tx_hash = keeper_result.get("tx_hash") or keeper_result.get("transactionHash") or keeper_result.get("transaction_hash")
-    
-    if keeper_success:
-        emit("KeeperHub Workflow: Executed successfully")
+    keeper_tx_hash = None
+    keeper_tx_link = None
+    keeper_status = "blocked"
+    keeper_success = False
+
+    if result["trust_score"] < 70:
+        emit("KeeperHub skipped: trust score below threshold")
+        keeper_result = {
+            "status": "blocked",
+            "success": False,
+            "reason": "trust_score_below_threshold",
+        }
     else:
-        emit("KeeperHub Workflow: Failed")
+        emit("Passing through KeeperHub")
+        keeper_result = trigger_keeperhub(result["trust_score"], task_id, intent, agent_name )
+        keeper_success = bool(keeper_result.get("success") or keeper_result.get("status") == "success")
+        keeper_status = keeper_result.get("status")
+        keeper_tx_hash = keeper_result.get("tx_hash") or keeper_result.get("transactionHash") or keeper_result.get("transaction_hash")
+        keeper_tx_link = keeper_result.get("tx_link") or keeper_result.get("transactionLink") or keeper_result.get("transaction_link")
 
-    if keeper_tx_hash:
-        emit(f"KeeperHub tx hash: {keeper_tx_hash}")
+        if keeper_success:
+            emit("KeeperHub Workflow: Executed successfully")
+        else:
+            emit("KeeperHub Workflow: Failed")
 
-    live_state["keeper_status"] = "EXECUTED" if keeper_success else "FAILED"
+        if keeper_tx_hash:
+            emit(f"KeeperHub tx hash: {keeper_tx_hash}")
+        if keeper_tx_link:
+            emit(f"KeeperHub tx link: {keeper_tx_link}")
+
+    live_state["keeper_status"] = "EXECUTED" if keeper_success else ("BLOCKED" if keeper_status == "blocked" else "FAILED")
     live_state["keeper"] = {
         "status": live_state["keeper_status"],
         "workflow_result": {
             **keeper_result,
             "tx_hash": keeper_tx_hash,
+            "tx_link": keeper_tx_link,
         },
     }
     CURRENT_STEP_STATE = STEP_DONE
@@ -292,7 +320,7 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
     new_checks = total_checks + 1
     new_score = round((current_score * total_checks + result["trust_score"]) / new_checks)
     emit(f"Trust score: {current_score} → {new_score}")
-    update_trust_score(agent_name, new_score, current_score, new_checks)
+    update_trust_score_and_og_proof(agent_name, new_score, current_score, new_checks, live_state["proof_hash"])
 
     phases, log_lines = build_trace_steps(
         task=task,
@@ -352,6 +380,7 @@ def run_traceback(task: str, urls: list[str]=[]) -> dict:
             "workflow_result": {
                 **keeper_result,
                 "tx_hash": keeper_tx_hash,
+                "tx_link": keeper_tx_link,
             },
         },
     }
@@ -362,29 +391,4 @@ if __name__ == "__main__":
     # TEST RUN
     final = run_traceback(
         task=cli_task or "When was Uniswap launched and who created it?"
-        # task="What is the current ETH gas price?"
-        # task="What are the latest Ethereum upgrades in 2026?"
-        # task="What is Vitalik Buterin's current net worth and his latest project in 2026?"
-
-        # urls=[
-        #     "https://en.wikipedia.org/wiki/Uniswap",
-        #     "https://uniswap.org/blog/uniswap-history"
-        # ]
     )
-
-
-    # CURRENT_CATEGORY = CAT_EXEC
-    # CURRENT_STEP = STEP_KEEPERHUB_GATE
-    # CURRENT_STEP_STATE = STEP_DONE
-    # CURRENT_LINE = "KeeperHub execution complete"
-    # PROCESS_STATE = STATE_DONE
-    # sync_logger_context()
-    # ui.push_state(
-    #     patch={
-    #         "final": final,
-    #         "current_category": CURRENT_CATEGORY,
-    #         "current_step": CURRENT_STEP,
-    #         "current_step_state": CURRENT_STEP_STATE,
-    #         "process_state": PROCESS_STATE,
-    #     }
-    # )
