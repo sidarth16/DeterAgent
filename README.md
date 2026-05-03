@@ -1,7 +1,8 @@
 # DeterAgent 🛡️
 ### Trust Firewall & Execution Layer for Autonomous AI Agents
 
-> No agent intent gets executed blindly. Not on our watch.
+> No verification. No execution 
+> Only trusted actions reach the chain
 
 ## The Problem
 
