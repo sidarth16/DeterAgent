@@ -17,7 +17,6 @@ DeterAgent intercepts every agent intent before execution.<br/>
 It verifies the decision against the same sources the agent used for its analysis, computes a trust score, and enforces execution based on that trust.
 Unverified actions are blocked. Trusted actions are executed.
 
-
 ---
 
 ## How It Works
@@ -56,11 +55,11 @@ Result: Trust Score 28/100 → Execution blocked → Agent reputation penalized
 
 ## Key Features
 
-- **Trust Firewall** — Every intent verified before execution
-- **Conditional Execution** — Intents gated on verifiable real-world conditions
+- **Trust Firewall** — Every intent verified from sources before execution
 - **Onchain Reputation** — Agent trust scores stored on ENS, updated after every run
 - **Agent Selection** - Agents are dynamically selected based on trust score and capabilities, ensuring only reliable agents are used.
 - **Verifiable Proofs** — Every source anchored to 0G Storage cryptographically
+- **Conditional Execution** — Intents gated on verifiable real-world conditions
 - **KeeperHub Execution** — Real onchain transactions, not simulations
 - **Telegram Alerts** — Real-time notifications on every execution
 - **No Blind Trust** — Agents earn reputation through verified performance
